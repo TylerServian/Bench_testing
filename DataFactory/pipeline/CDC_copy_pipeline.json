@@ -1,0 +1,322 @@
+{
+	"name": "CDC_copy_pipeline",
+	"properties": {
+		"activities": [
+			{
+				"name": "Lookup_load_time",
+				"type": "Lookup",
+				"dependsOn": [],
+				"policy": {
+					"timeout": "7.00:00:00",
+					"retry": 0,
+					"retryIntervalInSeconds": 30,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"source": {
+						"type": "AzureSqlSource",
+						"sqlReaderQuery": {
+							"value": "select max(load_time) as max_load_time from dbo.load_records where table_name = '@{pipeline().parameters.table_name}'",
+							"type": "Expression"
+						},
+						"queryTimeout": "02:00:00",
+						"partitionOption": "None"
+					},
+					"dataset": {
+						"referenceName": "AzureSqlTable1",
+						"type": "DatasetReference"
+					}
+				}
+			},
+			{
+				"name": "Copy_changes_to_storage",
+				"type": "Copy",
+				"dependsOn": [
+					{
+						"activity": "If_no_previous_load",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"policy": {
+					"timeout": "7.00:00:00",
+					"retry": 0,
+					"retryIntervalInSeconds": 30,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"source": {
+						"type": "AzureSqlSource",
+						"sqlReaderQuery": {
+							"value": "select * from dbo.@{pipeline().parameters.table_name} where update_on > '@{variables('last_load_time')}'",
+							"type": "Expression"
+						},
+						"queryTimeout": "02:00:00",
+						"partitionOption": "None"
+					},
+					"sink": {
+						"type": "DelimitedTextSink",
+						"storeSettings": {
+							"type": "AzureBlobStorageWriteSettings"
+						},
+						"formatSettings": {
+							"type": "DelimitedTextWriteSettings",
+							"quoteAllText": true,
+							"fileExtension": ".csv"
+						}
+					},
+					"enableStaging": false,
+					"translator": {
+						"type": "TabularTranslator",
+						"typeConversion": true,
+						"typeConversionSettings": {
+							"allowDataTruncation": true,
+							"treatBooleanAsNumber": false
+						}
+					}
+				},
+				"inputs": [
+					{
+						"referenceName": "AzureSqlTable2",
+						"type": "DatasetReference"
+					}
+				],
+				"outputs": [
+					{
+						"referenceName": "DelimitedText1",
+						"type": "DatasetReference",
+						"parameters": {
+							"directory": {
+								"value": "@variables('directory')",
+								"type": "Expression"
+							},
+							"file_name": {
+								"value": "@pipeline().parameters.table_name",
+								"type": "Expression"
+							}
+						}
+					}
+				]
+			},
+			{
+				"name": "Get_max_update_on",
+				"type": "Lookup",
+				"dependsOn": [
+					{
+						"activity": "If_no_previous_load",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"policy": {
+					"timeout": "7.00:00:00",
+					"retry": 0,
+					"retryIntervalInSeconds": 30,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"source": {
+						"type": "AzureSqlSource",
+						"sqlReaderQuery": {
+							"value": "select isnull(max(update_on), DATEADD(hh, 10, SYSUTCDATETIME())) as next_load_time from dbo.@{pipeline().parameters.table_name} where update_on > '@{variables('last_load_time')}'",
+							"type": "Expression"
+						},
+						"queryTimeout": "02:00:00",
+						"partitionOption": "None"
+					},
+					"dataset": {
+						"referenceName": "AzureSqlTable2",
+						"type": "DatasetReference"
+					}
+				}
+			},
+			{
+				"name": "Insert_load_record",
+				"type": "SqlServerStoredProcedure",
+				"dependsOn": [
+					{
+						"activity": "Copy_changes_to_storage",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					},
+					{
+						"activity": "Set_max_update_on",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"policy": {
+					"timeout": "7.00:00:00",
+					"retry": 0,
+					"retryIntervalInSeconds": 30,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"storedProcedureName": "[dbo].[successful_copy]",
+					"storedProcedureParameters": {
+						"table_name": {
+							"value": {
+								"value": "@pipeline().parameters.table_name",
+								"type": "Expression"
+							},
+							"type": "String"
+						},
+						"load_time": {
+							"value": {
+								"value": "@variables('max_update_on')",
+								"type": "Expression"
+							},
+							"type": "String"
+						}
+					}
+				},
+				"linkedServiceName": {
+					"referenceName": "AzureSqlDatabase1",
+					"type": "LinkedServiceReference"
+				}
+			},
+			{
+				"name": "Set_max_update_on",
+				"type": "SetVariable",
+				"dependsOn": [
+					{
+						"activity": "Get_max_update_on",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"userProperties": [],
+				"typeProperties": {
+					"variableName": "max_update_on",
+					"value": {
+						"value": "@activity('Get_max_update_on').output.firstRow['next_load_time']",
+						"type": "Expression"
+					}
+				}
+			},
+			{
+				"name": "If_no_previous_load",
+				"type": "IfCondition",
+				"dependsOn": [
+					{
+						"activity": "Lookup_load_time",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"userProperties": [],
+				"typeProperties": {
+					"expression": {
+						"value": "@equals(activity('Lookup_load_time').output.firstRow['max_load_time'], null)",
+						"type": "Expression"
+					},
+					"ifFalseActivities": [
+						{
+							"name": "Set_last_load_time",
+							"type": "SetVariable",
+							"dependsOn": [],
+							"userProperties": [],
+							"typeProperties": {
+								"variableName": "last_load_time",
+								"value": {
+									"value": "@activity('Lookup_load_time').output.firstRow['max_load_time']",
+									"type": "Expression"
+								}
+							}
+						},
+						{
+							"name": "Set_directory",
+							"type": "SetVariable",
+							"dependsOn": [
+								{
+									"activity": "Set_last_load_time",
+									"dependencyConditions": [
+										"Succeeded"
+									]
+								}
+							],
+							"userProperties": [],
+							"typeProperties": {
+								"variableName": "directory",
+								"value": {
+									"value": "@concat(pipeline().parameters.table_name, formatDateTime(variables('last_load_time'), '/yyyy/MM/dd/HH/mm'))",
+									"type": "Expression"
+								}
+							}
+						}
+					],
+					"ifTrueActivities": [
+						{
+							"name": "Set_last_load_time_empty",
+							"type": "SetVariable",
+							"dependsOn": [],
+							"userProperties": [],
+							"typeProperties": {
+								"variableName": "last_load_time",
+								"value": {
+									"value": "2000-01-01T00:00:00Z",
+									"type": "Expression"
+								}
+							}
+						},
+						{
+							"name": "Set_directory_today",
+							"type": "SetVariable",
+							"dependsOn": [
+								{
+									"activity": "Set_last_load_time_empty",
+									"dependencyConditions": [
+										"Succeeded"
+									]
+								}
+							],
+							"userProperties": [],
+							"typeProperties": {
+								"variableName": "directory",
+								"value": {
+									"value": "@concat(pipeline().parameters.table_name, formatDateTime(addhours(utcnow(), 10), '/yyyy/MM/dd/HH/mm'))",
+									"type": "Expression"
+								}
+							}
+						}
+					]
+				}
+			}
+		],
+		"concurrency": 1,
+		"parameters": {
+			"table_name": {
+				"type": "string",
+				"defaultValue": "customers"
+			}
+		},
+		"variables": {
+			"last_load_time": {
+				"type": "String"
+			},
+			"directory": {
+				"type": "String"
+			},
+			"max_update_on": {
+				"type": "String"
+			}
+		},
+		"annotations": [],
+		"lastPublishTime": "2022-05-19T03:39:55Z"
+	},
+	"type": "Microsoft.DataFactory/factories/pipelines"
+}

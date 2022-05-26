@@ -1,0 +1,9 @@
+{
+	"name": "tyler-data-factory",
+	"location": "australiasoutheast",
+	"identity": {
+		"type": "SystemAssigned",
+		"principalId": "3e4d7b14-bcf0-46e4-98d4-97f4baff9b67",
+		"tenantId": "558488b8-0fbc-4503-8317-8c54ea9c30a1"
+	}
+}
