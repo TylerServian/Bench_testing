@@ -6,8 +6,8 @@ on:
 
 defaults:
   run:
-    working-directory: ../../Terraform
-    
+    working-directory: Terraform
+
 jobs:
   terraform:
     runs-on: ubuntu-latest
