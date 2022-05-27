@@ -19,6 +19,6 @@ resource "azurerm_resource_group" "rg-hello-azure-tf" {
   name     = "rg-hello-azure-tf"
   location = "australiasoutheast"
   tags = {
-    Environment = "Changed environment tag"
+    Environment = "Changed environment tag again"
   }
 }
